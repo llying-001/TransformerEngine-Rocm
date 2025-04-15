@@ -50,7 +50,7 @@ const std::string &sm_arch_name(int device_id = -1);
  */
 int sm_count(int device_id = -1);
 
-#ifndef __HIP_PLATFORM_AMD__
+// #ifndef __HIP_PLATFORM_AMD__
 /* \brief CUDA Multicast support status for device
  *
  * \param[in] device_id CUDA device (default is current device)
@@ -59,6 +59,7 @@ int sm_count(int device_id = -1);
  */
 bool supports_multicast(int device_id = -1);
 
+#ifndef __HIP_PLATFORM_AMD__
 /* \brief Path to CUDA Toolkit headers
  *
  * The path can be configured by setting NVTE_CUDA_INCLUDE_DIR in the

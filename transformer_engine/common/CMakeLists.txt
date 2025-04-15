@@ -189,7 +189,11 @@ else()
        fused_softmax/scaled_upper_triang_masked_softmax.cu
        fused_softmax/scaled_aligned_causal_masked_softmax.cu
        fused_rope/fused_rope.cu
-       recipe/delayed_scaling.cu)
+       recipe/delayed_scaling.cu
+       comm_gemm_overlap/userbuffers/ipcsocket.cc
+       comm_gemm_overlap/userbuffers/userbuffers-host.cpp
+       comm_gemm_overlap/userbuffers/userbuffers.cu
+       comm_gemm_overlap/comm_gemm_overlap.cpp)
 
   # process source code files
   set(TE ${CMAKE_CURRENT_SOURCE_DIR}/../..)
@@ -202,7 +206,8 @@ else()
       ${CMAKE_CURRENT_SOURCE_DIR}/include 
       ${CMAKE_CURRENT_SOURCE_DIR}/util
       ${CMAKE_CURRENT_SOURCE_DIR}/rmsnorm
-      ${CMAKE_CURRENT_SOURCE_DIR}/layer_norm 
+      ${CMAKE_CURRENT_SOURCE_DIR}/layer_norm
+      ${CMAKE_CURRENT_SOURCE_DIR}/..
       ${CMAKE_CURRENT_SOURCE_DIR})
   message(STATUS "HIPIFY CUDA_SOURCE_DIR: ${CMAKE_CURRENT_SOURCE_DIR}")
   message(STATUS "HIPIFY HEADER_INCLUDE_DIR: ${header_include_dir}")
@@ -221,6 +226,8 @@ else()
 endif()
 target_include_directories(transformer_engine PUBLIC
                            "${CMAKE_CURRENT_SOURCE_DIR}/include")
+target_include_directories(transformer_engine PUBLIC
+                           "${CMAKE_CURRENT_SOURCE_DIR}")
 
 # Configure dependencies
 if (USE_CUDA)

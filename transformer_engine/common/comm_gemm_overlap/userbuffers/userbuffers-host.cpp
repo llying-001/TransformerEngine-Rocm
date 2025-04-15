@@ -312,8 +312,19 @@ int create_communicator_grouped2(communicator **comm, int myrank, int numranks, 
 
   NVTE_CHECK_CUDA(cudaMalloc(&(*comm)->flags, 2 * GPU_PAGE_SIZE));
   NVTE_CHECK_CUDA(cudaMemset((*comm)->flags, 0, 2 * GPU_PAGE_SIZE));
+  // TODO: identify the rightness that change CUdeviceptr to
+#if defined(__HIP_PLATFORM_AMD__) && !defined(__HIP_PLATFORM_NVIDIA__)
+#if defined(_WIN64) || defined(__LP64__)
+  (*comm)->flags =
+    reinterpret_cast<int *>(((unsigned long long)(*comm)->flags + GPU_PAGE_SIZE - 1) & GPU_PAGE_MASK);
+#else
+  (*comm)->flags =
+    reinterpret_cast<int *>(((unsigned int)(*comm)->flags + GPU_PAGE_SIZE - 1) & GPU_PAGE_MASK);
+#endif
+#else
   (*comm)->flags =
       reinterpret_cast<int *>(((CUdeviceptr)(*comm)->flags + GPU_PAGE_SIZE - 1) & GPU_PAGE_MASK);
+#endif
 
   using namespace std;
 

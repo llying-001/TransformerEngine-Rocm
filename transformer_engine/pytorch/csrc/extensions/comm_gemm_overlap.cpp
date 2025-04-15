@@ -5,7 +5,7 @@
  * 
  * See LICENSE for license information.
  ************************************************************************/
-#ifndef USE_ROCM
+// #ifndef USE_ROCM
 #include "../extensions.h"
 
 #define HALF_BYTES 2
@@ -480,4 +480,4 @@ torch::Tensor CommOverlapP2P::get_ubuf_output(int comm_type) {
   int output_c_dim1 = _ubuf.size(1);
   return torch::from_blob(ubuf_wt_ptr, {output_c_dim0, output_c_dim1}, _ubuf_torch.options());
 }
-#endif // !USE_ROCM
+// #endif // !USE_ROCM

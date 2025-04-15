@@ -36,7 +36,7 @@
 #endif
 
 // Define comm overlap handles if not using ROCm
-#ifndef USE_ROCM
+// #ifndef USE_ROCM
 #define NVTE_DECLARE_COMM_OVERLAP_HANDLES(m)                                                  \
   pybind11::enum_<transformer_engine::CommOverlapType>(m, "CommOverlapType")                  \
       .value("RS", transformer_engine::CommOverlapType::RS)                                   \
@@ -56,9 +56,9 @@
             py::call_guard<py::gil_scoped_release>(), py::arg("device_id") = -1);                 \
     m.def("ubuf_built_with_mpi", &transformer_engine::ubuf_built_with_mpi,                      \
             py::call_guard<py::gil_scoped_release>());
-#else
-#define NVTE_DECLARE_COMM_OVERLAP_HANDLES(m)
-#endif
+// #else
+// #define NVTE_DECLARE_COMM_OVERLAP_HANDLES(m)
+// #endif
 
 #define NVTE_DECLARE_COMMON_PYBIND11_HANDLES(m)                                               \
   pybind11::enum_<transformer_engine::DType>(m, "DType")                                      \
