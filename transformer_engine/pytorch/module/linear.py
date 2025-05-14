@@ -614,7 +614,7 @@ class _Linear(torch.autograd.Function):
         # Scatter fp8 weight buffers
         if ctx.fp8 and not isinstance(weight, Float8Tensor):
             _fsdp_scatter_tensors(ctx.fsdp_group, weight_fp8)
-
+        # print(f"[rank {torch.disributed.get_rank()}]TE linear wgrad:{wgrad}, dgrad:{dgrad}, grad_bias:{grad_bias}")
         return (
             wgrad,
             None,  # weight_fp8

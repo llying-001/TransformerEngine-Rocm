@@ -82,6 +82,7 @@ def get_multi_stream_cublas_workspace() -> List[torch.Tensor]:
 def initialize_ub(
     shape: list,
     tp_size: int,
+    shapes: Optional[list] = None,
     use_fp8: bool = False,
     dtype: torch.dtype = torch.bfloat16,
     ub_cfgs: Optional[dict] = None,
@@ -122,7 +123,7 @@ def initialize_ub(
              }
              ```
              for `te.TransformerLayer` GEMM layers in `["qkv_fprop", "qkv_dgrad", "qkv_wgrad",
-             "proj_fprop", "proj_dgrad", "proj_wgrad", "fc1_fprop", "fc1_dgrad", "fc2_dgrad",
+             "proj_fprop", "proj_dgrad", "proj_wgrad", "fc1_fprop", "fc1_dgrad", "fc1_wgrad",
              "fc2_fprop", "fc2_dgrad"]`.
     bootstrap_backend : str = None
                         `torch.distributed` communication backend for the all-gather, broadcast and
@@ -139,7 +140,7 @@ def initialize_ub(
             "CUDA device, driver and/or toolkit version does not support comm+GEMM overlap with "
             + "CUDA Multicast. Launch app with UB_SKIPMC=1 to try CUDA IPC instead."
         )
-
+    use_mla = bool(int(os.getenv("USE_MLA", "0")))
     global _ub_communicators
     assert _ub_communicators is None, "UB communicators are already initialized."
     _ub_communicators = {}
@@ -265,25 +266,72 @@ def initialize_ub(
     _cublas_workspace = get_workspace().repeat(_NUM_MAX_UB_STREAMS)
 
     # Default buffer precision: AllGather buffers use fp8 when using fp8 recipe
-    layers_all_gather_overlap = [
-        "qkv_fprop",
-        "qkv_dgrad",
-        "proj_dgrad",
-        "fc1_fprop",
-        "fc1_dgrad",
-        "fc2_dgrad",
-    ]
-    layers_reduce_scatter_overlap = ["proj_fprop", "fc2_fprop", "qkv_wgrad", "fc1_wgrad"]
-    dgrad_reduce_scatter_overlap = ["qkv_dgrad", "fc1_dgrad"]
-    # Default overlap methods for layers
-    methods = {
-        "ring_exchange": ["qkv_fprop", "fc1_fprop", "proj_dgrad", "fc2_dgrad"],
-        "pipeline": ["proj_fprop", "fc2_fprop"],
-        "bulk": ["qkv_dgrad", "qkv_wgrad", "fc1_dgrad", "fc1_wgrad"],
-    }
+    if use_mla:
+        layers_all_gather_overlap = [
+            # "q_proj_fprop",
+            # "q_proj_dgrad",
+            # "q_up_fprop",
+            # "q_up_dgrad",
+            "kv_up_proj_fprop",
+            "kv_up_proj_dgrad",
+            "proj_dgrad",
+            "fc1_fprop",
+            "fc1_dgrad",
+            "fc2_dgrad",
+        ]
 
-    # AG-RS overlap pairs of layers forming a tensor-parallel block
-    ag_rs_pairs = {"qkv_fprop": "proj_fprop", "fc1_fprop": "fc2_fprop"}
+        layers_reduce_scatter_overlap = [
+            "proj_fprop",
+            "fc2_fprop",
+            "fc1_wgrad",
+            # "q_proj_wgrad",
+            # "q_up_wgrad",
+            "kv_up_proj_wgrad"
+        ]
+        dgrad_reduce_scatter_overlap = [
+            "fc1_dgrad",
+            # "q_proj_dgrad",
+            # "q_up_dgrad",
+            "kv_up_proj_dgrad"
+        ]
+        # Default overlap methods for layers
+        methods = {
+            "ring_exchange": ["fc1_fprop", "proj_dgrad", "fc2_dgrad", "kv_up_proj_fprop"], # "q_proj_fprop","q_up_fprop",
+            "pipeline": ["proj_fprop", "fc2_fprop"],
+            "bulk": ["fc1_dgrad", "fc1_wgrad", "kv_up_proj_dgrad", "kv_up_proj_wgrad"], #"q_proj_dgrad", "q_proj_wgrad", "q_up_dgrad", "q_up_wgrad",
+        }
+
+        # AG-RS overlap pairs of layers forming a tensor-parallel block
+        # TODO: q_proj/q_up_proj/kv_up_proj
+        ag_rs_pairs = {"kv_up_proj_fprop": "proj_fprop", "fc1_fprop": "fc2_fprop"}
+    else:
+        layers_all_gather_overlap = [
+            "qkv_fprop",
+            "qkv_dgrad",
+            "proj_dgrad",
+            "fc1_fprop",
+            "fc1_dgrad",
+            "fc2_dgrad",
+        ]
+
+        layers_reduce_scatter_overlap = [
+            "proj_fprop",
+            "fc2_fprop",
+            "qkv_wgrad",
+            "fc1_wgrad",
+        ]
+        dgrad_reduce_scatter_overlap = [
+            "qkv_dgrad",
+            "fc1_dgrad"
+        ]
+        # Default overlap methods for layers
+        methods = {
+            "ring_exchange": ["qkv_fprop", "fc1_fprop", "proj_dgrad", "fc2_dgrad"], # "q_up_fprop",
+            "pipeline": ["proj_fprop", "fc2_fprop"],
+            "bulk": ["qkv_dgrad", "qkv_wgrad", "fc1_dgrad", "fc1_wgrad"], # "q_up_dgrad", "q_up_wgrad",
+        }
+        ag_rs_pairs = {"qkv_fprop": "proj_fprop", "fc1_fprop": "fc2_fprop"}
+
     rs_ag_pairs = {v: k for k, v in ag_rs_pairs.items()}
     global layers_atomic_ring_exchange
     layers_atomic_ring_exchange = []
@@ -359,9 +407,13 @@ def initialize_ub(
                     assert rs_ag_pairs[name] in layers_atomic_ring_exchange, assert_message
 
         buffer_dtype = torch.uint8 if (use_fp8 and fp8_buf) else dtype
+        new_shape = shape
+        # print(f"shape assert: {use_mla=}, {'kv_up_proj' in name.strip()}, {shapes=}")
+        if use_mla and 'kv_up_proj' in name.strip() and (shapes is not None) and len(shapes) > 1:
+            new_shape = shapes[1]
         if method == "ring_exchange":
             ub_obj = tex.CommOverlapP2P(
-                shape,  # Communication buffer shape
+                new_shape,  # Communication buffer shape
                 buffer_dtype,  # Communication buffer data type
                 helper,  # Helper for torch.distributed callbacks during bootstrapping
                 tp_size,  # Tensor-parallel group size (may be different than local_size)
@@ -376,7 +428,7 @@ def initialize_ub(
             )
         else:
             ub_obj = tex.CommOverlap(
-                shape,  # Communication buffer shape
+                new_shape,  # Communication buffer shape
                 buffer_dtype,  # Communication buffer data type
                 helper,  # Helper for torch.distributed callbacks during bootstrapping
                 tp_size,  # Tensor-parallel group size (may be different than local_size)
@@ -409,6 +461,8 @@ def initialize_ub(
             )
             ub_cfg.update(ub_cfgs[name])
             ub_cfg["fp8_buf"] = fp8_buf
+        if torch.distributed.get_rank() == 0:
+            print("ub_cfg:", ub_cfg)
         add_ub(name, **ub_cfg)
 
 

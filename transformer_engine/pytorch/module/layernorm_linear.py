@@ -418,7 +418,8 @@ class _LayerNormLinear(torch.autograd.Function):
                 weight_fp8 if ctx.fp8 and not isinstance(weight, Float8Tensor) else None,
                 ln_out,
             )
-
+            # if torch.distributed.get_rank() == 4:
+            #     print(f"[rank {torch.distributed.get_rank()}]TE layernorm_linear BWD ln_out:{ln_out.shape}-{ln_out.mean()},")
             if ctx.cpu_offloading and ctx.fuse_wgrad_accumulation:
                 weight = torch.nn.Parameter(weight, weight.requires_grad)
                 weight.main_grad = main_grad
@@ -565,13 +566,33 @@ class _LayerNormLinear(torch.autograd.Function):
                     ub=ub_obj,
                     extra_output_tensor=rs_out if ctx.ub_overlap_rs_dgrad else None,
                 )
+            #     if ctx.ub_overlap_rs_dgrad:
+            #         dgrad_file = f"p2p_dgrad_{torch.distributed.get_rank()}.pt"
+            #         rs_dgrad_file = f"p2p_rs_dgrad_{torch.distributed.get_rank()}.pt"
+            #         if not os.path.exists(dgrad_file):
+            #             print(f"[rank {torch.distributed.get_rank()}]TE layernorm_linear BWD save dgrad:{dgrad.shape}-{dgrad.mean()}-{dgrad}")
+            #             torch.save(dgrad, dgrad_file)
+            #         if not os.path.exists(rs_dgrad_file):
+            #             print(f"[rank {torch.distributed.get_rank()}]TE layernorm_linear BWD save rs dgrad:{rs_out.shape}-{rs_out.mean()}-{rs_out}")
+            #             torch.save(rs_out, rs_dgrad_file)
+            #     else:
+            #         dgrad_file = f"nolap_dgrad_{torch.distributed.get_rank()}.pt"
+            #         if not os.path.exists(dgrad_file):
+            #             torch.save(dgrad, dgrad_file)
+            # print(f"[rank {torch.distributed.get_rank()}]TE layernorm_linear BWD after linear dgrad:{dgrad.shape}-{dgrad.mean()}-{dgrad}")
+            # if torch.distributed.get_rank() == 4:
+            #     print(f"[rank {torch.distributed.get_rank()}]TE layernorm_linear BWD after linear dgrad:{dgrad.shape}-{dgrad.mean()}, input grad_output-{grad_output.mean()}, weight-{weight.mean()}")
             if ctx.ub_bulk_dgrad:
                 ln_out_total = ub_obj_lnout.get_ubuf_output(1)
+                # if torch.distributed.get_rank() == 4:
+                #     print(f"[rank {torch.distributed.get_rank()}]TE layernorm_linear BWD ln_out_total:{ln_out_total.shape}-{ln_out_total.mean()},")
 
             # Overlap dgrad-RS/AR with wgrad
             if ctx.parallel_mode == "column" and ctx.sequence_parallel:
                 if not ctx.ub_bulk_dgrad and handle is not None:
                     handle.wait()
+                # if torch.distributed.get_rank() == 4:
+                #     print(f"[rank {torch.distributed.get_rank()}]no TE layernorm_linear BWD ln_out_total:{ln_out_total.shape}-{ln_out_total.mean()},")
                 if not ctx.ub_bulk_wgrad and not ctx.ub_overlap_rs_dgrad:
                     if ctx.return_layernorm_output and ctx.return_layernorm_output_gathered:
                         dgrad = dgrad + grad_outputs[1].view_as(dgrad)
@@ -661,9 +682,13 @@ class _LayerNormLinear(torch.autograd.Function):
                         ub_algo=tex.CommOverlapAlgo.BULK_OVERLAP_RS if ctx.ub_bulk_wgrad else None,
                         ub=ub_obj_dgrad if ctx.ub_bulk_wgrad else None,
                     )
+                    # if torch.distributed.get_rank() == 4:
+                    #     print(f"[rank {torch.distributed.get_rank()}]TE layernorm_linear BWD after linear wgrad, wgrad:{wgrad.shape}-{wgrad.mean()}")
                     clear_tensor_data(ln_out_total)
                     if ctx.ub_bulk_wgrad:
                         dgrad = ub_obj_dgrad.get_ubuf_output(0)  # Reduce-scatter output
+                        # if torch.distributed.get_rank() == 4:
+                        #     print(f"[rank {torch.distributed.get_rank()}]TE layernorm_linear BWD after linear wgrad, dgrad-rs:{dgrad.shape}-{dgrad.mean()}")
 
             # Column Parallel Linear
             if (
@@ -673,12 +698,15 @@ class _LayerNormLinear(torch.autograd.Function):
                 and handle is not None
             ):
                 handle.wait()
+                # if torch.distributed.get_rank() == 4:
+                #     print(f"[rank {torch.distributed.get_rank()}]no-TE layernorm_linear BWD after linear wgrad, dgrad-rs:{dgrad.shape}-{dgrad.mean()}-{dgrad},")
 
             # LayerNorm gradient
             if ctx.ub_overlap_rs_dgrad:
                 dgrad = rs_out.view(inputmat.shape)
             else:
                 dgrad = dgrad.view(inputmat.shape)
+            # print(f"[rank {torch.distributed.get_rank()}]TE layernorm_linear BWD after linear wgrad, dgrad-rs:{dgrad.shape}-{dgrad.mean()}-{dgrad},")
 
             # Residual gradient
             if ctx.return_layernorm_output and not ctx.return_layernorm_output_gathered:
@@ -706,6 +734,8 @@ class _LayerNormLinear(torch.autograd.Function):
                     ctx.zero_centered_gamma,
                 )
                 dbeta = None
+                # if torch.distributed.get_rank() == 4:
+                #     print(f"[rank {torch.distributed.get_rank()}]TE layernorm_linear BWD after rmsnorm, dgrad-rs:{dgrad.shape}-{dgrad.mean()}, inputmat:{inputmat.shape}-{inputmat.mean()}, rsigma:{rsigma.mean()}, ln_weight:{ln_weight.mean()}")
             clear_tensor_data(mu)
             clear_tensor_data(rsigma)
 
@@ -741,7 +771,7 @@ class _LayerNormLinear(torch.autograd.Function):
         # Scatter fp8 weight buffers
         if ctx.fp8 and not isinstance(weight, Float8Tensor):
             _fsdp_scatter_tensors(ctx.fsdp_group, weight_fp8)
-
+        # print(f"[rank {torch.disributed.get_rank()}]TE layernorm_linear wgrad:{wgrad}, dgrad:{dgrad}, grad_bias:{grad_bias}, dgamma:{dgamma}, dbeta:{dbeta}")
         return (
             dgrad.view(ctx.inp_shape) if ctx.requires_dgrad else None,
             dgamma,

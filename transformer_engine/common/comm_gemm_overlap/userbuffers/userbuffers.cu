@@ -5,14 +5,20 @@
  ************************************************************************/
 
 #include <cuda.h>
-#include <cuda_fp8.h>
 #include <cuda_runtime.h>
 
+#if !defined(__HIP_PLATFORM_AMD__) && defined(__HIP_PLATFORM_NVIDIA__)
+#include <cuda_fp8.h>
 #if __CUDA_ARCH__ >= 800
 #include <cuda_bf16.h>
 #define half nv_bfloat16
 #else
 #include <cuda_fp16.h>
+#endif
+#else
+#include <hip/hip_bfloat16.h>
+#include "amd_detail/hip_float8.h"
+#define half hip_bfloat16
 #endif
 
 #include <assert.h>
@@ -2055,7 +2061,7 @@ void reducescatter2_userbuff_inplace(const int handler, const int offset, const 
   }
 #else
   int threads = comm->threads;
-  callranks_ag(2) callranks_ag(4) callranks_ag(8)
+  callranks_rs(2) callranks_rs(4) callranks_rs(8)
 #endif
 }
 
@@ -2085,7 +2091,7 @@ void reducescatter2_userbuff_stridedoutput(void *output, const int handler, cons
   }
 #else
   int threads = comm->threads;
-  callranks_ag(2) callranks_ag(4) callranks_ag(8)
+  callranks_rs_oop(2) callranks_rs_oop(4) callranks_rs_oop(8)
 #endif
 }
 
@@ -2893,6 +2899,7 @@ template void reduce_fp8_in_bf16_out<__nv_fp8_e5m2>(void *inputs, void *output, 
 __global__ void __launch_bounds__(MAX_THREADS / 4)
     reduce_bf16_cuda(void *inputs, void *output, const int num_inputs, const int input_size) {
   const size_t tid = threadIdx.x + blockDim.x * blockIdx.x;
+  if(tid >= input_size) return;
   half *inputs_half = reinterpret_cast<half *>(inputs);
   float accum_buf = static_cast<float>(inputs_half[tid]);
 #pragma unroll

@@ -265,6 +265,7 @@ def gemm(
         False,  # use_split_accumulator
     )
     fn = torch.ops.tex_ts.te_gemm_ts
+    # print(f"GEMM {ub_algo=}, {ub=}")
     if ub_algo is not None:
         assert ub is not None, "ub object is None!"
         if ub_algo == tex.CommOverlapAlgo.BULK_OVERLAP_AG:
